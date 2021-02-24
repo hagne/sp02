@@ -39,7 +39,27 @@ conf_2= {'A': 412, 'B': 500, 'C': 675, 'D': 862}
 database.addnewinstrument(1,1,1032,conf_2)
 database.addnewinstrument(2,1,1046,conf_1)
 
-installdate = '20131125'
+installdate = '20131126'
+database.add2line_table('mlo', installdate, 121, 2)
+database.add2line_table('mlo', installdate, 221, 1)
+
+installdate = '20140104' # something is statring to go wrong on that day!
+database.add2line_table('mlo', installdate, 121, 1)
+database.add2line_table('mlo', installdate, 221, 2)
+
+installdate = '20141204' 
+database.add2line_table('mlo', installdate, 121, 2)
+database.add2line_table('mlo', installdate, 221, 1)
+
+installdate = '20151203' 
+database.add2line_table('mlo', installdate, 121, 1)
+database.add2line_table('mlo', installdate, 221, 2)
+
+installdate = '20161211' 
+database.add2line_table('mlo', installdate, 121, 1)
+database.add2line_table('mlo', installdate, 221, 2)
+
+installdate = '20171207' 
 database.add2line_table('mlo', installdate, 121, 2)
 database.add2line_table('mlo', installdate, 221, 1)
 
@@ -49,6 +69,9 @@ database.add2line_table('mlo', '20200205', 221, 2)
 database.add2line_table('mlo', '20200620', 121, 2)
 database.add2line_table('mlo', '20200620', 221, 1)
 
+installdate = '20210204' 
+database.add2line_table('mlo', installdate, 121, 1)
+database.add2line_table('mlo', installdate, 221, 2)
 
 def get_lines_from_station_header(path = '/nfs/grad/gradobs/documentation/station_headers/MLO_header.xlsx', line_ids = [121, 221]):
     path2header = pathlib.Path(path)
@@ -119,12 +142,12 @@ def read_file(path2raw, lines = None,
 
     # make datetime index
     df_all['HHMM'] = df_all.apply(lambda row: f'{int(row.HHMM):04d}', axis=1)
-    df_all.index = df_all.apply(lambda row: pd.to_datetime(f'{int(row.Year)}0101') + pd.to_timedelta(row.DOY, 'd') + pd.to_timedelta(int(row.HHMM[:2]), 'h') + pd.to_timedelta(int(row.HHMM[2:]), 'm'), axis=1)
+    df_all.index = df_all.apply(lambda row: pd.to_datetime(f'{int(row.Year)}0101') + pd.to_timedelta(row.DOY - 1 , 'd') + pd.to_timedelta(int(row.HHMM[:2]), 'h') + pd.to_timedelta(int(row.HHMM[2:]), 'm'), axis=1)
     df_all.index.name = 'datetime'
     
-    data_list = []
-    df_inst_temp = pd.DataFrame()
-    df_inst_channels = pd.DataFrame()
+    # data_list = []
+    # df_inst_temp = pd.DataFrame()
+    # df_inst_channels = pd.DataFrame()
     out['df_all'] = df_all.copy()
     # return out
     out_list = []
@@ -137,6 +160,11 @@ def read_file(path2raw, lines = None,
                 continue
             
         df_lid = df_all[df_all.lineID == lid].copy()
+        
+        # there was the case that Longenecker must have created an overlab when stiching two days together ... therefor ->
+        df_lid = df_lid[~df_lid.index.duplicated()]
+        df_lid.sort_index(inplace=True)
+        
         instrument = database.get_instrument(site, lid, date)
         df_lid = df_lid.drop(['lineID', 'Year','DOY', 'HHMM'], axis=1)
         df_lid.columns = ['A', 'B', 'C', 'D', 'temp']
@@ -250,38 +278,71 @@ def convert_raw2nc(path2rawfolder = '/nfs/grad/gradobs/raw/mlo/2020/', path2netc
     # lines = get_lines_from_station_header()
     path2rawfolder = pathlib.Path(path2rawfolder)
     path2netcdf = pathlib.Path(path2netcdf)
-    path2netcdf.mkdir(exist_ok=True)
+    try:
+        path2netcdf.mkdir(exist_ok=True)
+    except FileNotFoundError:
+        path2netcdf.parent.mkdir()
+        path2netcdf.mkdir()
 
     file_list = list(path2rawfolder.glob(pattern))
     # print(len(file_list))
 
     # file_contents = []
-    return file_list
+    # return file_list
     
     df_in = pd.DataFrame(file_list, columns=['path_in'])
-    df_in.index = df_in.path_in.apply(lambda x: pd.to_datetime(x.name.split('.')[2]))
+
+    
+    
+    # test what format, old or new.
+    p2f = file_list[0]
+    nl = p2f.name.split('.')
+    
+    if len(nl) == 2:
+        # old format like /nfs/grad/gradobs/raw/mlo/2013/sp02/MLOD013A.113
+        # get year from path
+        def path2date(path2file):
+            year = path2file.parent.parent.name
+            jul = int(''.join(filter(str.isdigit, path2file.name.split('.')[0])))
+            date = pd.to_datetime(year) + pd.to_timedelta(jul-1, 'd')
+            return date
+        # df_in.index = df_in.path_in.apply(lambda x: pd.to_datetime(year) + pd.to_timedelta((int(''.join(filter(str.isdigit, x.name.split('.')[0]))))-1, 'd'))
+        
+    else:
+        # new format: gradobs.mlo-sp02.20200126.raw.dat
+        # df_in.index = df_in.path_in.apply(lambda x: pd.to_datetime(x.name.split('.')[2]))
+        path2date = lambda x: pd.to_datetime(x.name.split('.')[2])
+    
+    # set index based on format
+    df_in.index = df_in.path_in.apply(path2date)
     df_in.sort_index(inplace=True)
     df_in = df_in.truncate(before=start_date)
     
     df_out = pd.DataFrame(columns=['path_out'])
     
+    # generate output path
     for sn in sernos:
         for idx, row in df_in.iterrows():
-            fnnc = row.path_in.name.replace('.dat','.nc')
-            fnnc = fnnc.replace('-sp02', '.sp02')
-            fnns = fnnc.split('.')
-            fnns = fnns[:3] + [f'sn{str(sn)}'] + fnns[3:]
-            fnnc = '.'.join(fnns)
+            # fnnc = row.path_in.name.replace('.dat','.nc')
+            # fnnc = fnnc.replace('-sp02', '.sp02')
+            # fnns = fnnc.split('.')
+            # fnns = fnns[:3] + [f'sn{str(sn)}'] + fnns[3:]
+            # fnnc = '.'.join(fnns)
+            # path2netcdf_file = path2netcdf.joinpath(fnnc)
+            date = idx
+            fnnc = f'gradobs.mlo.sp02.sn{sn}.{date.year}{date.month:02d}{date.day:02d}.raw.nc'
             path2netcdf_file = path2netcdf.joinpath(fnnc)
-    
             df_add = pd.DataFrame({'path_in': row.path_in, 'path_out':path2netcdf_file}, index = [idx]
         #                            ignore_index=True
                                   )
     
             df_out = df_out.append(df_add)
     
+    # check if file exists. Process only those that do not exist
     df_out['exists'] = df_out.path_out.apply(lambda x: x.is_file())
     df_work = df_out[~df_out.exists]
+    # return df_work
+### bsts
     work_array = df_work.path_in.unique()
 
     print(f'No of files that need to be processed: {len(work_array)}')
@@ -291,38 +352,43 @@ def convert_raw2nc(path2rawfolder = '/nfs/grad/gradobs/raw/mlo/2020/', path2netc
     for e, file in enumerate(work_array):
         # if e == 3: break
         # ds = read_file(file, lines)
+        df_sel = df_work[df_work.path_in == file]
         try:
             dslist = read_file(file, database = database, site = None)
         except IndexError:
             print('Instrument not installed ... skip', end = '...')
             continue
-        ### generate output file name
+        ### generate output file name 
         # processing
         for ds in dslist:
-            fnnc = file.name.replace('.dat','.nc')
-            fnnc = fnnc.replace('-sp02', '.sp02')
-            fnns = fnnc.split('.')
-            fnns = fnns[:3] + [f'sn{str(ds.serial_no.values)}'] + fnns[3:]
-            fnnc = '.'.join(fnns)
-            path2netcdf_file = path2netcdf.joinpath(fnnc)
-
-            # ds = read_file(file, lines)
-    
-    
-    
+            # fnnc = file.name.replace('.dat','.nc')
+            # fnnc = fnnc.replace('-sp02', '.sp02')
+            # fnns = fnnc.split('.')
+            # fnns = fnns[:3] + [f'sn{str(ds.serial_no.values)}'] + fnns[3:]
+            # fnnc = '.'.join(fnns)
+            # path2netcdf_file = path2netcdf.joinpath(fnnc)
+            
+            # check which of the output files is the right ... still, i am not convinced this is the most elegant way to do this.... add the lineno in the work table?
+            sn = str(ds.serial_no.values)
+            try:
+                path2netcdf_file = [p2fo for p2fo in df_sel.path_out.values if sn in p2fo.name][0]
+            except IndexError:
+                assert(False), 'This Error is usually caused because one of the netcdf files (for a serial number) is deleted, but not the other.'
+        
             # save to file
             ds.to_netcdf(path2netcdf_file)
-            # new += 1
         if test:
             break
     # out = dict(processed = new,
     #            skipped = exists,
     #            last_ds_list = dslist)
-    df_out['exists'] = df_out.path_out.apply(lambda x: x.is_file())
-    df_work = df_out[~df_out.exists]
-    work_array = df_work.path_in.unique()
     
-    assert(df_work.shape[0] == 0)
+    if not test:
+        df_out['exists'] = df_out.path_out.apply(lambda x: x.is_file())
+        df_work = df_out[~df_out.exists]
+        work_array = df_work.path_in.unique()
+        
+        assert(df_work.shape[0] == 0), f'df_work should be empty at the end. Still has {df_work.shape[0]} entries.'
     return 
 
 

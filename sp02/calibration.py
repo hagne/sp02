@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import pandas as pd
-from scipy import stats
+# from scipy import stats
 import scipy as sp
 import numpy as np
 import pathlib
@@ -72,10 +72,12 @@ def plot_langley(lang_ds, wls = 'all', date = 'Test'):
     else:
         pass
 #     wl = 500
+    aas = []
     for wl in wls:
         lan = lang_ds.langleys.to_pandas()[wl]
         resid = lang_ds.langley_fit_residual.to_pandas()[wl]
         f,aa = plt.subplots(2, sharex=True, gridspec_kw={'hspace': 0})
+        aas.append(aa)
         alan, ares = aa
         
         fitres = lang_ds.langley_fitres.to_pandas().loc[wl]
@@ -93,7 +95,7 @@ def plot_langley(lang_ds, wls = 'all', date = 'Test'):
         ares.grid()
         
         alan.set_title(f'{date} - channel {wl}nm')
-    return f,aa
+    return f,aas
 
 class Langley(object):
     def __init__(self, parent, langleys, langley_fit_settings = None):
@@ -106,11 +108,15 @@ class Langley(object):
         self._langley_fit_residual = None
     
     def to_xarray_dataset(self):
+        try:
+            serialno = self.parent.raw_data.serial_no.values[0]
+        except IndexError:
+            serialno = self.parent.raw_data.serial_no.values
         ds = xr.Dataset({'langleys': self.langleys,
                          'langley_fit_residual': self.langley_fit_residual,
                          'langley_fitres': self.langley_fitres,
                          'langley_residual_correlation_prop': self.langley_residual_correlation_prop['determinant'],
-                         'sp02_serial_no': self.parent.raw_data.serial_no.values[0]})
+                         'sp02_serial_no': serialno})
         return ds
     
     def save2netcdf(self, path2file):
@@ -142,7 +148,6 @@ class Langley(object):
         # df_langres = pd.DataFrame(index=['slope', 'intercept', 'stderr'])
         fit_res_dict = {}
         resid_dict = {}
-# !!!!!!!!!!!!!!!!! Baustelle
         for wl in langleys:
             # lrg_res = stats.linregress(langleys.index, langleys[wl])
             # df_langres[wl] = pd.Series({'slope': lrg_res.slope, 'intercept': lrg_res.intercept, 'stderr': lrg_res.stderr})
@@ -329,7 +334,7 @@ class Calibration(object):
         out['ds_results'] = interceptstdrmin
         return Calibration(out)
     
-    def plot_good_enough(self, best=None, col = 'A'):
+    def plot_good_enough(self, best=None, col = 'A', std_error_goal = [2, 2e-4, 2e-3, 1e-1]):
         # col = 'A'
         df = self.langley_fitres.langley_fitres.sel(wavelength = col).to_pandas()
         df_corr = self.langley_fitres.correlation_matrix_properties.to_pandas()
@@ -364,17 +369,23 @@ class Calibration(object):
         df.intercept.plot(ax = a_int, marker = 'o')
         at_int = a_int.twinx()
         df.intercept_stderr.plot(ax = at_int, color = colors[1], marker = 'o')
+        at_int.axhline(y = std_error_goal[0], ls = '--', color = 'black')
+        
 
         ### slope
         df.slope.plot(ax = a_slope, marker = 'o')
         at_slope = a_slope.twinx()
         df.slope_stderr.plot(ax = at_slope, color = colors[1], marker = 'o')
+        at_slope.axhline(y = std_error_goal[1], ls = '--', color = 'black')
 
         ### curvature
         df.resid_curvature.plot(ax = a_curv, marker = 'o')
+        a_curv.axhline(y = std_error_goal[2], ls = '--', color = 'black')
+
 
         ### correlation
         df_corr.plot(ax = a_corr, marker = 'o')        
+        a_corr.axhline(y = std_error_goal[3], ls = '--', color = 'black')
 
         ### Labels 
         a_int.set_ylabel('V0 (mV)')
@@ -387,7 +398,7 @@ class Calibration(object):
         # return a_corr,df_corr
         return aa
     
-    def plot_data_with_fit(self, top = 0):
+    def plot_data_with_fit(self, top = 0, wls = 'all'):
         which = top
 
         path2ncfld = pathlib.Path('./langleys/')
@@ -410,7 +421,7 @@ class Calibration(object):
 
         ds = xr.open_dataset(path2ncfld.joinpath(fn))
 
-        f, aa = plot_langley(ds, date = f'{which} - {date}')
+        f, aa = plot_langley(ds, wls = wls, date = f'{which} - {date}')
         return aa
 
 class CalibrationsOverTime(object):
@@ -540,7 +551,7 @@ class CalibrationsOverTime(object):
         std.rename(cw, inplace=True)
         return mean, std
     
-    def plot(self, slides = False, serial_no = None):
+    def plot(self, slides = False, serial_no = None, show_change_of_last = True, show_desired_diff = 0.025):
         out = {}
         df_v0_ts = self.results['mean'].sort_index()
         df_v0_ts_error = self.results['std'].sort_index()
@@ -580,8 +591,12 @@ class CalibrationsOverTime(object):
         ### average over all but last
 
         oldcal = df_v0_ts.iloc[:-1, :].mean()
-
+        
+        f,aa = plt.subplots(2,2, constrained_layout=True)
+        aa = [a for at in aa for a in at]
+        f.set_size_inches(9, 7)
         for e,ch in enumerate(df_v0_ts):
+            out_ch = {}
             if slides:
                 if np.mod(e,4) == 0:
                     blank_slide_layout = prs.slide_layouts[6]
@@ -589,54 +604,66 @@ class CalibrationsOverTime(object):
                     txBox = slide.shapes.add_textbox(tleft, ttop, width, 0.2)
                     tf = txBox.text_frame
                     tf.text = f'sn #{serial_no}'
-            f,a = plt.subplots()
-            f.set_size_inches(4.5, 3.5)
+            
         #     df_v0_ts[ch].plot(ax = a)
+            a = aa[e]
             a.plot(df_v0_ts[ch].index, df_v0_ts[ch].values,marker = 'o', markersize = 5, ls = '--')
 
             a.errorbar(df_v0_ts[ch].index, df_v0_ts[ch].values, df_v0_ts_error[ch].values, capsize = 2, ls = '', ecolor = 'red', zorder = 10)
         #     a.errorbar()
 
-            # average over everything before 18
-            a.axhline(y = oldcal.loc[ch], color = colors[1])
+            # this allows to look at differences of current (last) calibration to the previous ones
+            if show_change_of_last:
+                # average over everything but the last
+                a.axhline(y = oldcal.loc[ch], color = colors[1])
 
+                # annotate change from previous average
+                anhere = df_v0_ts.index[-1] - pd.to_timedelta(4*365, 'd')
+                avg = oldcal.loc[ch]
+                last = df_v0_ts[ch].values[-1]
+                mid = (avg + last)/2
+                diff = (last - avg)/avg *100
+    
+                a.annotate('',
+                        xy=(anhere, avg), xycoords='data',
+                        xytext=(anhere, last), textcoords='data',
+                        arrowprops=dict(arrowstyle="<->",
+                                        connectionstyle="arc3"),
+                        ha = 'center',
+                        va = 'center'
+                        )
+                a.text(anhere, mid, f" {diff:0.1f} %")
+                
+                
+                # annotate change from last time
+                anhere = df_v0_ts.index[-1] - pd.to_timedelta(1*365, 'd')
+                avg = df_v0_ts[ch].values[-2]
+                last = df_v0_ts[ch].values[-1]
+                mid = (avg + last)/2
+                diff = (last - avg)/avg *100
+                dist = avg - last
+    
+                a.annotate('',
+                        xy=(anhere, avg), xycoords='data',
+                        xytext=(anhere, last), textcoords='data',
+                        arrowprops=dict(arrowstyle="<->",
+                                        connectionstyle="arc3"),
+                        ha = 'center',
+                        va = 'center'
+                        )
+                a.text(anhere, mid, f" {diff:0.1f} %")
 
-        #     anhere = pd.to_datetime('20140101')
-            anhere = df_v0_ts.index[-1] - pd.to_timedelta(4*365, 'd')
-            avg = oldcal.loc[ch]
-            last = df_v0_ts[ch].values[-1]
-            mid = (avg + last)/2
-            diff = (last - avg)/avg *100
+            else:
+                a.axhline(y = df_v0_ts.mean().loc[ch], color = colors[1])
 
-            a.annotate('',
-                    xy=(anhere, avg), xycoords='data',
-                    xytext=(anhere, last), textcoords='data',
-                    arrowprops=dict(arrowstyle="<->",
-                                    connectionstyle="arc3"),
-                    ha = 'center',
-                    va = 'center'
-                    )
-            a.text(anhere, mid, f" {diff:0.1f} %")
-
-            # annotate change from last time
-            anhere = df_v0_ts.index[-1] - pd.to_timedelta(1*365, 'd')
-            avg = df_v0_ts[ch].values[-2]
-            last = df_v0_ts[ch].values[-1]
-            mid = (avg + last)/2
-            diff = (last - avg)/avg *100
-            dist = avg - last
-
-            a.annotate('',
-                    xy=(anhere, avg), xycoords='data',
-                    xytext=(anhere, last), textcoords='data',
-                    arrowprops=dict(arrowstyle="<->",
-                                    connectionstyle="arc3"),
-                    ha = 'center',
-                    va = 'center'
-                    )
-            a.text(anhere, mid, f" {diff:0.1f} %")
-
-
+            # for e,at in enumerate(aa):
+            mean = df_v0_ts.mean().iloc[e]
+            perc = show_desired_diff
+            a.axhspan(mean - (mean * perc), mean + (mean * perc),
+                      # color = colors[1], 
+                      color = '0.8',
+                      # alpha = 0.3
+                      )
 
             a.set_title(f'channel: {ch} nm')
             a.grid()
@@ -648,6 +675,9 @@ class CalibrationsOverTime(object):
         if slides:
             prs.save(path2ppt)
             out['slides'] = prs
+        out['f'] = f
+        out['aa'] = aa
+        out['df_v0_ts'] = df_v0_ts
         return out
     
 
@@ -683,6 +713,14 @@ class SP02RawData(object):
             self._get_langley_from_raw() 
         return self._pm
     
+    def tp_get_rdl(self):
+        raw_df = self.raw_data.raw_data.to_pandas()
+        
+        # changing to local time
+        raw_df_loc = raw_df.copy()
+        index_local = raw_df.index + pd.to_timedelta(self.site.time_zone[1], 'h')
+        raw_df_loc.index = index_local
+        self.raw_df_loc = raw_df_loc
         
     
     def _get_langley_from_raw(self):
@@ -692,15 +730,18 @@ class SP02RawData(object):
         raw_df_loc = raw_df.copy()
         index_local = raw_df.index + pd.to_timedelta(self.site.time_zone[1], 'h')
         raw_df_loc.index = index_local
-
+        # self.tp_rdl = raw_df_loc.copy()
+        
         # getting the one day
+        sunpos = self.sun_position.copy()
         start = raw_df_loc.index[0]
-        start = pd.to_datetime(f'{start.year}{start.month:02d}{start.day:02d}') + pd.to_timedelta(1,'d')
+        if sunpos.iloc[0].airmass > 0:
+            start = pd.to_datetime(f'{start.year}{start.month:02d}{start.day:02d}') + pd.to_timedelta(1,'d')
         end = start + pd.to_timedelta(1, 'd')
         raw_df_loc = raw_df_loc.truncate(start, end)
 
         # localize and cut day for sunposition
-        sunpos = self.sun_position.copy()
+        
         sunpos.index = index_local
         sunpos = sunpos.truncate(start, end)
 
@@ -733,8 +774,14 @@ class SP02RawData(object):
         sunpos_am[sunpos.index > noon] = np.nan
         sunpos_pm[sunpos.index < noon] = np.nan
         
+
         langley_am = raw_df_loc.copy()
         langley_pm = raw_df_loc.copy()
+
+        self.tp_sp_am = sunpos_am
+        self.tp_sp_pm = sunpos_pm
+        self.tp_df_am = langley_am[~sunpos_am.airmass.isna()].copy()
+        self.tp_df_pm = langley_am[~sunpos_pm.airmass.isna()].copy()
 
         langley_am.index = sunpos_am.airmass
         langley_pm.index = sunpos_pm.airmass
@@ -751,11 +798,57 @@ def raw2langleys(site,
                  path2netcdf = '/mnt/telg/data/baseline/mlo/2020/',
                  pattern = '*.nc',
                  pathout_fld = '.',
+                 # local_day_in_one_file = False,
                  break_when_error = False,
                  test = False):
+    """
+    Takes the raw data (from the netcdf files) and generates the langleys
+
+    Parameters
+    ----------
+    site : TYPE
+        DESCRIPTION.
+    start_date : TYPE, optional
+        DESCRIPTION. The default is '20200205'.
+    end_date : TYPE, optional
+        DESCRIPTION. The default is '20200207'.
+    path2netcdf : TYPE, optional
+        DESCRIPTION. The default is '/mnt/telg/data/baseline/mlo/2020/'.
+    pattern : TYPE, optional
+        DESCRIPTION. The default is '*.nc'.
+    pathout_fld : TYPE, optional
+        DESCRIPTION. The default is '.'.
+    break_when_error : TYPE, optional
+        DESCRIPTION. The default is False.
+    test : TYPE, optional
+        DESCRIPTION. The default is False.
+
+    Deprecated
+    ----------
+    local_day_in_one_file : bool, optional
+        Usually files contain a single day in UTC, therefore, one need to 
+        combine two files to get the entire (am and pm). Older versions from
+        Longenecker took care of this; choose True in this case. The default
+        is False.
+
+    Raises
+    ------
+    ValueError
+        DESCRIPTION.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    """
+    # local_day_in_one_file = False
     out = {}
     mlo = site
-    path2netcdf = pathlib.Path(path2netcdf)
+    if not isinstance(path2netcdf, list):
+        path2netcdf = [path2netcdf]
+        
+    path2netcdf = [pathlib.Path(p2n) for p2n in path2netcdf]
     # path2netcdf.mkdir()
 
     ### generate folder names and work plan
@@ -768,17 +861,14 @@ def raw2langleys(site,
     pathout_fld_run = pathout_fld.joinpath(runname)
     pathout_fld_run.mkdir(exist_ok=True)
     
-
-
-    df = pd.DataFrame(list(path2netcdf.glob(pattern)), columns=['path'])
+    # df = pd.DataFrame(list(path2netcdf.glob(pattern)), columns=['path'])
+    
+    p2nglob = [p2f for p2n in path2netcdf for p2f in list(p2n.glob(pattern))]
+    df = pd.DataFrame(p2nglob, columns=['path'])
     
     ### start time index
     df.index = df.apply(lambda row: pd.to_datetime(row.path.name.split('.')[4]), axis=1)
     df.sort_index(inplace=True)
-    df_files = df
-    
-
-    ### return df_files
 
     df_sel = df.truncate(before = start_date,
                          after = end_date
@@ -787,34 +877,50 @@ def raw2langleys(site,
     ### open first file to get serial number for output names and testing
     ds = xr.open_dataset(df_sel.iloc[0,0])
     serial_no = int(ds.serial_no.values)
+    # return ds
     ds.close()
     
     ### generate output files and check if exists
     df_sel['path_out'] = df_sel.apply(lambda x: pathout_fld_run.joinpath(f'sn{serial_no}_{x.name.year:04d}{x.name.month:02d}{x.name.day:02d}_am.nc'), axis = 1)
     df_sel['output_file_exists'] = df_sel.path_out.apply(lambda x: x.is_file())    
-    total_no = df_sel.shape[0] - 1 # -1 since I alsways process 2 at a time
+    total_no = df_sel.shape[0] # -1 since I alsways process 2 at a time
     df_sel = df_sel[~df_sel.output_file_exists]
-    work_no = df_sel.shape[0] - 1
+    work_no = df_sel.shape[0]
     
 
     print(f'processing {work_no} of a total of {total_no} files: ', end = '')
     # return df_sel, serial_no, ds, pathout_fld_run
     
     reslist_am = []
-    dstl = []
-    # print(f'processing {df_sel.shape[0]} files', end = ' ... ')
-    for i in range(len(df_sel)-1):
+    # dstl = []
+    
+    for i in range(len(df_sel)):
 
-    #     if i == 2:
-    #         break
+        # if i == 2:
+        #     break
     #     if i <= 46:
     #         continue
         print(i,end = '.')
-        row_duo = df_sel.iloc[i:i+2]
+        
+        # deprecated
+        # if local_day_in_one_file:
+        #     ds = xr.open_dataset(df_sel.iloc[i].path)
+        #     serial_no_raw = ds.serial_no.values
+        # else:
+        #######
+        try:
+            row_duo = df_sel.iloc[i:i+2]
+        except KeyError:
+            assert(False), 'this error was expected, take care of it now. '
         ds = xr.open_mfdataset(row_duo.path, combine='by_coords')
-        out['tp1'] = row_duo.path
-        raw = SP02RawData(ds, mlo)
-        serial_no_raw = raw.raw_data.serial_no.values[0]
+        try:
+            serial_no_raw = ds.serial_no.values[0]
+        except IndexError:
+            serial_no_raw = ds.serial_no.values
+        # out['tp1'] = row_duo.path
+        raw = SP02RawData(ds, mlo)        
+        # return raw
+        # serial_no_raw = raw.raw_data.serial_no.values[0]
         if serial_no_raw != serial_no:
             raise ValueError('serial no is {serial_no_raw}, but should be {serial_no}')
     #     dstl.append(raw)
@@ -868,7 +974,7 @@ def raw2langleys(site,
         coord_time = [res['datetime'] for res in reslist_am]
         correlation_props = [res['correlation_prop'] for res in reslist_am]    
         coord_linreg = raw.am.langley_fitres.columns.values
-        coord_amf = raw.am.langleys.index
+        # coord_amf = raw.am.langleys.index
         coord_wavelengths = raw.am.langley_fitres.index.values
         langley_fitres_da = xr.DataArray(fitresarray, coords=[coord_time, coord_wavelengths, coord_linreg], dims=['datetime', 'wavelength', 'linreg_param'])
         
@@ -883,15 +989,22 @@ def raw2langleys(site,
         cmp.columns.name = 'matrix_properties'
         ds['correlation_matrix_properties'] = cmp
         
-        ds['channle_wavelengths'] = raw.raw_data.channle_wavelengths.to_pandas().iloc[1]
+        channel_wl = raw.raw_data.channle_wavelengths.to_pandas()#.iloc[1]
+        print(f'channel_wl: {channel_wl.shape}')
+        if len(channel_wl.shape)==2:
+            channel_wl = channel_wl.iloc[1]
+        ds['channle_wavelengths'] = channel_wl
         ds['sp02_serial_no'] = serial_no
     
     
         
         if pathout_file.exists():
             ds_others = xr.open_dataset(pathout_file) 
-            ds = xr.concat([ds, ds_others], dim = 'datetime')
-            ds = ds.sortby('datetime')
+            ds_new = xr.concat([ds, ds_others], dim = 'datetime')
+            ds_new = ds.sortby('datetime')
+            ds_new['channle_wavelengths'] = ds_new['channle_wavelengths']
+            ds_new['sp02_serial_no'] = ds['sp02_serial_no']
+            ds = ds_new
             ds_others.close()
     
         ds.to_netcdf(pathout_file)
@@ -903,7 +1016,7 @@ def raw2langleys(site,
         raw = None
         
         
-
+    ds.close()
     out['ds_results'] = ds
     out['last_raw_instance'] = raw
     return Calibration(out)
