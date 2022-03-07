@@ -552,6 +552,26 @@ class CalibrationsOverTime(object):
         return mean, std
     
     def plot(self, slides = False, serial_no = None, show_change_of_last = True, show_desired_diff = 0.025):
+        """
+        Gray span shows the exceptable change (plus minus mean*sow_desired_diff)
+
+        Parameters
+        ----------
+        slides : TYPE, optional
+            DESCRIPTION. The default is False.
+        serial_no : TYPE, optional
+            DESCRIPTION. The default is None.
+        show_change_of_last : TYPE, optional
+            DESCRIPTION. The default is True.
+        show_desired_diff : TYPE, optional
+            DESCRIPTION. The default is 0.025.
+
+        Returns
+        -------
+        out : TYPE
+            DESCRIPTION.
+
+        """
         out = {}
         df_v0_ts = self.results['mean'].sort_index()
         df_v0_ts_error = self.results['std'].sort_index()

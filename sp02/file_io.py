@@ -24,7 +24,7 @@ class BaselineDatabase(object):
     #     site = 'mlo'
     #     line = 121
 #         date = df_all.index[0]
-        lt_site_line = self.line_table[np.logical_and(self.line_table.site == 'mlo', self.line_table.line == line)]
+        lt_site_line = self.line_table[np.logical_and(self.line_table.site == site, self.line_table.line == line)]
         previous_installs = lt_site_line[lt_site_line.install <= date]
         if previous_installs.shape[0] == 0:
             raise IndexError(f'Instrument not installed (line:{line}, site: {site}, date: {date}')
@@ -73,6 +73,18 @@ installdate = '20210204'
 database.add2line_table('mlo', installdate, 121, 1)
 database.add2line_table('mlo', installdate, 221, 2)
 
+# # testing: installation in BRW... 
+# installdate = '20210318' 
+# uninstalldate = '20211008' 
+# database.add2line_table('brw', installdate, 121, 1)
+# # database.add2line_table('brw', installdate, 101, 1)
+# database.add2line_table('brw', installdate, 221, 2)
+# database.add2line_table('brw', installdate, 221, 2)
+
+installdate = '20220101' 
+database.add2line_table('mlo', installdate, 121, 1)
+database.add2line_table('mlo', installdate, 221, 2)
+
 def get_lines_from_station_header(path = '/nfs/grad/gradobs/documentation/station_headers/MLO_header.xlsx', line_ids = [121, 221]):
     path2header = pathlib.Path(path)
 
@@ -95,12 +107,13 @@ def read_file(path2raw, lines = None,
               site = None
               ):
     """
-    
+    The particular way I am reading here allows for later implementation of
+    reading old data from Longenecker. And also allows to read other raw files
 
     Parameters
     ----------
-    path2raw : TYPE
-        DESCRIPTION.
+    path2raw : str, list, pathlib.Path
+        Single or list of path(s) to file(s).
     lines : list, optional
         List of lines to consider (e.g. [121, 221] for sp02 at MLO). The default is None -> all.
     collabels : TYPE, optional
@@ -117,18 +130,19 @@ def read_file(path2raw, lines = None,
         DESCRIPTION.
 
     """
-    # the particular way I am reading here allows for later implementation of
-    # reading old data from Longenecker. And also allows to read other raw files
-    
-    # if isinstance(instruement, type(None)):
-    #     collabels = 
-    # collabels = lines[0]['column_labels']
+        
     out = {}
     collabels = np.array(collabels)
     
-    df_all = pd.read_csv(path2raw, header=None
-    #             names = False
-               )
+    #open
+    if not isinstance(path2raw, list):
+        path2raw = [path2raw,]
+
+    df_all = pd.concat([pd.read_csv(p2r, header=None) for p2r in path2raw])
+    
+    # df_all = pd.read_csv(path2raw, header=None
+    # #             names = False
+    #            )
     # out['df_all_01'] = df_all.copy()
     colsis = df_all.columns.values
     colsis = [int(col) for col in colsis]
@@ -242,8 +256,10 @@ def convert_raw2nc(path2rawfolder = '/nfs/grad/gradobs/raw/mlo/2020/', path2netc
                    start_date = '2020-02-06',
                    pattern = '*sp02.*',
                    sernos = [1032, 1046],
+                   site = 'mlo',
                    overwrite = False, 
                    verbose = False, 
+                   raise_error = True,
                    test = False):
     """
     
@@ -354,10 +370,16 @@ def convert_raw2nc(path2rawfolder = '/nfs/grad/gradobs/raw/mlo/2020/', path2netc
         # ds = read_file(file, lines)
         df_sel = df_work[df_work.path_in == file]
         try:
-            dslist = read_file(file, database = database, site = None)
+            dslist = read_file(file, database = database, site = site)
         except IndexError:
-            print('Instrument not installed ... skip', end = '...')
-            continue
+            if raise_error:
+                raise
+            else:
+                print('Instrument not installed ... skip', end = '...')
+                if test:
+                    return {'file': file, 'database': database}
+                else:
+                    continue
         ### generate output file name 
         # processing
         for ds in dslist:
