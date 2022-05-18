@@ -20,8 +20,6 @@ colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
 
 def fit_langley(langley, weighted = True):
     """
-    
-
     Parameters
     ----------
     langley : TYPE
@@ -746,13 +744,13 @@ class SP02RawData(object):
     def _get_langley_from_raw(self):
         raw_df = self.raw_data.raw_data.to_pandas()
         
-        # changing to local time
+        #### changing to local time
         raw_df_loc = raw_df.copy()
         index_local = raw_df.index + pd.to_timedelta(self.site.time_zone[1], 'h')
         raw_df_loc.index = index_local
         # self.tp_rdl = raw_df_loc.copy()
         
-        # getting the one day
+        ##### getting the one day
         sunpos = self.sun_position.copy()
         start = raw_df_loc.index[0]
         if sunpos.iloc[0].airmass > 0:
@@ -760,20 +758,17 @@ class SP02RawData(object):
         end = start + pd.to_timedelta(1, 'd')
         raw_df_loc = raw_df_loc.truncate(start, end)
 
-        # localize and cut day for sunposition
-        
+        #### localize and cut day for sunposition
         sunpos.index = index_local
         sunpos = sunpos.truncate(start, end)
 
-        # remove the night
+        #### remove the night
         sunpos[sunpos.airmass < 0] = np.nan
 
-        # get the minimum airmass befor I start cutting it out
+        #### get the minimum airmass befor I start cutting it out
         noon = sunpos.airmass.idxmin()
 
-        # the data needs to be normalized to the sun_earth_distance
-#         self.tp_raw_df_loc = raw_df_loc.copy()
-#         self.tp_sunpos = sunpos.copy()
+        #### normalize to the sun_earth_distance
         raw_df_loc = raw_df_loc.multiply(sunpos.sun_earth_distance**2, axis=0)
     
         # langleys are the natural logarith of the voltage over the AMF ... -> log

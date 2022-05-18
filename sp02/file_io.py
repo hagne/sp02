@@ -12,12 +12,16 @@ class BaselineDatabase(object):
 
     def add2line_table(self, site,install_datetime, line_id, instrument_id, comment = ''):#20200205
         install_datetime = pd.to_datetime(install_datetime)
-        new_line_table_entry = {'site':site,'install': install_datetime, 'line': line_id, 'instrument_id': instrument_id, 'comment': comment}
-        self.line_table = self.line_table.append(new_line_table_entry, ignore_index=True)
+        new_line_table_entry = pd.DataFrame({'site':site,'install': install_datetime, 'line': line_id, 'instrument_id': instrument_id, 'comment': comment}, index = [instrument_id])
+        # self.line_table = self.line_table.append(new_line_table_entry, ignore_index=True)
+        self.line_table = pd.concat([self.line_table, new_line_table_entry], ignore_index=True)
         return
     
-    def addnewinstrument(self, instrument_id, type_id, sn, config_id):
-        self.instrument_table =  self.instrument_table.append({'instrument_id': instrument_id,'type_id':type_id, 'sn': sn, 'config':config_id}, ignore_index=True)
+    def addnewinstrument(self, instrument_id, type_id, sn, config):
+        # self.instrument_table =  self.instrument_table.append({'instrument_id': instrument_id,'type_id':type_id, 'sn': sn, 'config':config_id}, ignore_index=True)
+        # new_instrument = pd.DataFrame({'instrument_id': instrument_id,'type_id':type_id, 'sn': sn, 'config':config}, index = [instrument_id])
+        new_instrument = pd.DataFrame( [[instrument_id, type_id, sn, config]], columns = ['instrument_id', 'type_id', 'sn', 'config'],index = [instrument_id])
+        self.instrument_table = pd.concat([self.instrument_table, new_instrument])#, ignore_index=True)
         return 
     
     def get_instrument(self, site, line, date):
@@ -34,11 +38,16 @@ class BaselineDatabase(object):
         return instrument_found
     
 database = BaselineDatabase()
+#### filter comfigurations
 conf_1= {'A': 368, 'B': 1050, 'C': 610, 'D': 778}
 conf_2= {'A': 412, 'B': 500, 'C': 675, 'D': 862}
+
+#### Instruments 
 database.addnewinstrument(1,1,1032,conf_2)
 database.addnewinstrument(2,1,1046,conf_1)
+database.addnewinstrument(3,1,1022,conf_2)
 
+#### instrument linups
 installdate = '20131126'
 database.add2line_table('mlo', installdate, 121, 2)
 database.add2line_table('mlo', installdate, 221, 1)
@@ -84,6 +93,9 @@ database.add2line_table('mlo', installdate, 221, 2)
 installdate = '20220101' 
 database.add2line_table('mlo', installdate, 121, 1)
 database.add2line_table('mlo', installdate, 221, 2)
+
+installdate = '20220309' 
+database.add2line_table('mlo', installdate, 121, 3)
 
 def get_lines_from_station_header(path = '/nfs/grad/gradobs/documentation/station_headers/MLO_header.xlsx', line_ids = [121, 221]):
     path2header = pathlib.Path(path)
