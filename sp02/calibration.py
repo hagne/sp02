@@ -700,112 +700,130 @@ class CalibrationsOverTime(object):
     
 
 
-class SP02RawData(object):
-    def __init__(self, dataset, site, langley_fit_settings = None):
-        self.raw_data = dataset
-        self.site = site
-        self.langley_fit_settings = langley_fit_settings
-        self._sun_position = None
-        self._am = None
-        self._pm = None
-        # self._langleys_am = None
-        # self._langleys_pm = None
-        # self._langley_fitres_am = None
-        # self._langley_fitres_pm = None
+# class SP02RawData(object):
+#     def __init__(self, dataset, site, langley_fit_settings = None):
+#         self.raw_data = dataset
+#         self.site = site
+#         self.langley_fit_settings = langley_fit_settings
+#         self._sun_position = None
+#         self._am = None
+#         self._pm = None
+#         # self._langleys_am = None
+#         # self._langleys_pm = None
+#         # self._langley_fitres_am = None
+#         # self._langley_fitres_pm = None
         
-    @property
-    def sun_position(self):
-        if isinstance(self._sun_position, type(None)):
-            self._sun_position = self.site.get_sun_position(self.raw_data.datetime)
-        return self._sun_position
+#     @property
+#     def sun_position(self):
+#         if isinstance(self._sun_position, type(None)):
+#             self._sun_position = self.site.get_sun_position(self.raw_data.datetime)
+#         return self._sun_position
     
-    @property
-    def am(self):
-        if isinstance(self._am, type(None)):
-            self._get_langley_from_raw() 
-        return self._am
+#     @property
+#     def am(self):
+#         if isinstance(self._am, type(None)):
+#             self._get_langley_from_raw() 
+#         return self._am
     
-    @property
-    def pm(self):
-        if isinstance(self._pm, type(None)):
-            self._get_langley_from_raw() 
-        return self._pm
+#     @property
+#     def pm(self):
+#         if isinstance(self._pm, type(None)):
+#             self._get_langley_from_raw() 
+#         return self._pm
     
-    def tp_get_rdl(self):
-        raw_df = self.raw_data.raw_data.to_pandas()
+#     def tp_get_rdl(self):
+#         raw_df = self.raw_data.raw_data.to_pandas()
         
-        # changing to local time
-        raw_df_loc = raw_df.copy()
-        index_local = raw_df.index + pd.to_timedelta(self.site.time_zone[1], 'h')
-        raw_df_loc.index = index_local
-        self.raw_df_loc = raw_df_loc
+#         # changing to local time
+#         raw_df_loc = raw_df.copy()
+#         index_local = raw_df.index + pd.to_timedelta(self.site.time_zone[1], 'h')
+#         raw_df_loc.index = index_local
+#         self.raw_df_loc = raw_df_loc
         
     
-    def _get_langley_from_raw(self):
-        raw_df = self.raw_data.raw_data.to_pandas()
+#     def _get_langley_from_raw(self):
+#         raw_df = self.raw_data.raw_data.to_pandas()
         
-        #### changing to local time
-        raw_df_loc = raw_df.copy()
-        index_local = raw_df.index + pd.to_timedelta(self.site.time_zone[1], 'h')
-        raw_df_loc.index = index_local
-        # self.tp_rdl = raw_df_loc.copy()
+#         #### changing to local time
+#         raw_df_loc = raw_df.copy()
+#         index_local = raw_df.index + pd.to_timedelta(self.site.time_zone[1], 'h')
+#         raw_df_loc.index = index_local
+#         # self.tp_rdl = raw_df_loc.copy()
         
-        ##### getting the one day
-        sunpos = self.sun_position.copy()
-        start = raw_df_loc.index[0]
-        if sunpos.iloc[0].airmass > 0:
-            start = pd.to_datetime(f'{start.year}{start.month:02d}{start.day:02d}') + pd.to_timedelta(1,'d')
-        end = start + pd.to_timedelta(1, 'd')
-        raw_df_loc = raw_df_loc.truncate(start, end)
+#         ##### getting the one day
+#         sunpos = self.sun_position.copy()
+#         start = raw_df_loc.index[0]
+#         if sunpos.iloc[0].airmass > 0:
+#             start = pd.to_datetime(f'{start.year}{start.month:02d}{start.day:02d}') + pd.to_timedelta(1,'d')
+#         end = start + pd.to_timedelta(1, 'd')
+#         raw_df_loc = raw_df_loc.truncate(start, end)
 
-        #### localize and cut day for sunposition
-        sunpos.index = index_local
-        sunpos = sunpos.truncate(start, end)
+#         #### localize and cut day for sunposition
+#         sunpos.index = index_local
+#         sunpos = sunpos.truncate(start, end)
 
-        #### remove the night
-        sunpos[sunpos.airmass < 0] = np.nan
+#         #### remove the night
+#         sunpos[sunpos.airmass < 0] = np.nan
 
-        #### get the minimum airmass befor I start cutting it out
-        noon = sunpos.airmass.idxmin()
+#         #### get the minimum airmass befor I start cutting it out
+#         noon = sunpos.airmass.idxmin()
 
-        #### normalize to the sun_earth_distance
-        raw_df_loc = raw_df_loc.multiply(sunpos.sun_earth_distance**2, axis=0)
+#         #### normalize to the sun_earth_distance
+#         raw_df_loc = raw_df_loc.multiply(sunpos.sun_earth_distance**2, axis=0)
     
-        # langleys are the natural logarith of the voltage over the AMF ... -> log
-        # to avoid warnings and strange values do some cleaning before log
-        raw_df_loc[raw_df_loc <= 0] = np.nan
-#         self.tp_raw_df = raw_df.copy()
-        raw_df_loc = np.log(raw_df_loc)    
+#         # langleys are the natural logarith of the voltage over the AMF ... -> log
+#         # to avoid warnings and strange values do some cleaning before log
+#         raw_df_loc[raw_df_loc <= 0] = np.nan
+# #         self.tp_raw_df = raw_df.copy()
+#         raw_df_loc = np.log(raw_df_loc)    
     
-        # keep only what is considered relevant airmasses
-        amf_min = 2.2 
-        amf_max = 4.7
-        sunpos[sunpos.airmass < amf_min] = np.nan
-        sunpos[sunpos.airmass > amf_max] = np.nan
+#         # keep only what is considered relevant airmasses
+#         amf_min = 2.2 
+#         amf_max = 4.7
+#         sunpos[sunpos.airmass < amf_min] = np.nan
+#         sunpos[sunpos.airmass > amf_max] = np.nan
 
-        sunpos_am = sunpos.copy()
-        sunpos_pm = sunpos.copy()
+#         sunpos_am = sunpos.copy()
+#         sunpos_pm = sunpos.copy()
 
-        sunpos_am[sunpos.index > noon] = np.nan
-        sunpos_pm[sunpos.index < noon] = np.nan
+#         sunpos_am[sunpos.index > noon] = np.nan
+#         sunpos_pm[sunpos.index < noon] = np.nan
         
 
-        langley_am = raw_df_loc.copy()
-        langley_pm = raw_df_loc.copy()
+#         langley_am = raw_df_loc.copy()
+#         langley_pm = raw_df_loc.copy()
 
-        self.tp_sp_am = sunpos_am
-        self.tp_sp_pm = sunpos_pm
-        self.tp_df_am = langley_am[~sunpos_am.airmass.isna()].copy()
-        self.tp_df_pm = langley_am[~sunpos_pm.airmass.isna()].copy()
+#         self.tp_sp_am = sunpos_am
+#         self.tp_sp_pm = sunpos_pm
+#         self.tp_df_am = langley_am[~sunpos_am.airmass.isna()].copy()
+#         self.tp_df_pm = langley_am[~sunpos_pm.airmass.isna()].copy()
 
-        langley_am.index = sunpos_am.airmass
-        langley_pm.index = sunpos_pm.airmass
+#         langley_am.index = sunpos_am.airmass
+#         langley_pm.index = sunpos_pm.airmass
 
-        self._am = Langley(self,langley_am[~langley_am.index.isna()], langley_fit_settings = self.langley_fit_settings)
-        self._pm = Langley(self,langley_pm[~langley_pm.index.isna()], langley_fit_settings = self.langley_fit_settings)
-        return True
+#         self._am = Langley(self,langley_am[~langley_am.index.isna()], langley_fit_settings = self.langley_fit_settings)
+#         self._pm = Langley(self,langley_pm[~langley_pm.index.isna()], langley_fit_settings = self.langley_fit_settings)
+#         return True
 
-   
+def load_calibration_history():
+    l0m = ['/mnt/telg/projects/sp02/calibration/2013_14_mlo_cal/calibration_result_1032.nc',
+           '/mnt/telg/projects/sp02/calibration/2020_summer_mlo_cal/calibration_result_1032.nc',
+           # '/mnt/telg/projects/sp02/calibration/2020_mlo_cal/calibration_result_1032.nc',
+           '/mnt/telg/projects/sp02/calibration/2020_21_mlo_cal/calibration_result_1032.nc',
+           '/mnt/telg/projects/sp02/calibration/2021_22_mlo_cal/calibration_result_1032.nc',
+          ]
+    history_1032 = CalibrationsOverTime(list0path2modern=l0m)
+    
+    l0m = ['/mnt/telg/projects/sp02/calibration/2020_summer_mlo_cal/calibration_result_1046.nc',
+           # '/mnt/telg/projects/sp02/calibration/2020_mlo_cal/calibration_result_1046.nc',
+           '/mnt/telg/projects/sp02/calibration/2013_14_mlo_cal/calibration_result_1046.nc',
+           '/mnt/telg/projects/sp02/calibration/2020_21_mlo_cal/calibration_result_1046.nc',
+           '/mnt/telg/projects/sp02/calibration/2021_22_mlo_cal/calibration_result_1046.nc']
+    history_1046 = CalibrationsOverTime(list0path2modern=l0m)
+    
+    calibrations = {1032: history_1032,
+                    1046: history_1046}
+    return calibrations
     
 def raw2langleys(site,
                  start_date = '20200205',
@@ -866,7 +884,7 @@ def raw2langleys(site,
     path2netcdf = [pathlib.Path(p2n) for p2n in path2netcdf]
     # path2netcdf.mkdir()
 
-    ### generate folder names and work plan
+    #### generate folder names and work plan
     runname = 'langleys'
     
     pathout_fld = pathlib.Path(pathout_fld)
@@ -889,7 +907,7 @@ def raw2langleys(site,
                          after = end_date
                         )
     
-    ### open first file to get serial number for output names and testing
+    #### open first file to get serial number for output names and testing
     ds = xr.open_dataset(df_sel.iloc[0,0])
     serial_no = int(ds.serial_no.values)
     # return ds
@@ -910,19 +928,8 @@ def raw2langleys(site,
     # dstl = []
     
     for i in range(len(df_sel)):
-
-        # if i == 2:
-        #     break
-    #     if i <= 46:
-    #         continue
         print(i,end = '.')
         
-        # deprecated
-        # if local_day_in_one_file:
-        #     ds = xr.open_dataset(df_sel.iloc[i].path)
-        #     serial_no_raw = ds.serial_no.values
-        # else:
-        #######
         try:
             row_duo = df_sel.iloc[i:i+2]
         except KeyError:
@@ -932,14 +939,9 @@ def raw2langleys(site,
             serial_no_raw = ds.serial_no.values[0]
         except IndexError:
             serial_no_raw = ds.serial_no.values
-        # out['tp1'] = row_duo.path
         raw = SP02RawData(ds, mlo)        
-        # return raw
-        # serial_no_raw = raw.raw_data.serial_no.values[0]
         if serial_no_raw != serial_no:
             raise ValueError('serial no is {serial_no_raw}, but should be {serial_no}')
-    #     dstl.append(raw)
-    #     resdict_am[row_duo.index[0]] = raw.langley_fitres_am.copy()
         try:
             raw.am
         except:

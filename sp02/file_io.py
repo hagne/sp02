@@ -3,7 +3,8 @@ import xarray as xr
 import numpy as np
 import pandas as pd
 import pathlib
-
+from sp02.products.raw_nc import SP02RawData
+import magic
 
 class BaselineDatabase(object):
     def __init__(self):
@@ -24,14 +25,42 @@ class BaselineDatabase(object):
         self.instrument_table = pd.concat([self.instrument_table, new_instrument])#, ignore_index=True)
         return 
     
-    def get_instrument(self, site, line, date):
+    def get_instrument(self, site, line, date, when_instrument_not_installed = 'error'):
+        """
+        
+
+        Parameters
+        ----------
+        site : TYPE
+            DESCRIPTION.
+        line : TYPE
+            DESCRIPTION.
+        date : TYPE
+            DESCRIPTION.
+        when_instrument_not_installed : string, optional ('error', 'warn', 'silent')
+            When silent or warn None is returned. The default is 'error'.
+
+        Returns
+        -------
+        None.
+
+        """
     #     site = 'mlo'
     #     line = 121
 #         date = df_all.index[0]
         lt_site_line = self.line_table[np.logical_and(self.line_table.site == site, self.line_table.line == line)]
         previous_installs = lt_site_line[lt_site_line.install <= date]
         if previous_installs.shape[0] == 0:
-            raise IndexError(f'Instrument not installed (line:{line}, site: {site}, date: {date}')
+            txt = f'Instrument not installed (line:{line}, site: {site}, date: {date}'
+            if when_instrument_not_installed == 'error':
+                raise IndexError(txt)
+            elif when_instrument_not_installed == 'warn':
+                Warning.warn(txt)
+                return None
+            elif when_instrument_not_installed == 'silent':
+                return None
+            else:
+                assert(False), f'{when_instrument_not_installed} not an option for when_instrument_not_installed. (error, warn,or silent)'
         lt_found = previous_installs.iloc[-1]
 
         instrument_found = self.instrument_table[self.instrument_table.instrument_id == lt_found.instrument_id].iloc[0]
@@ -45,7 +74,7 @@ conf_2= {'A': 412, 'B': 500, 'C': 675, 'D': 862}
 #### Instruments 
 database.addnewinstrument(1,1,1032,conf_2)
 database.addnewinstrument(2,1,1046,conf_1)
-database.addnewinstrument(3,1,1022,conf_2)
+database.addnewinstrument(3,1,1022,conf_2) #typically at SPO
 
 #### instrument linups
 installdate = '20131126'
@@ -82,11 +111,11 @@ installdate = '20210204'
 database.add2line_table('mlo', installdate, 121, 1)
 database.add2line_table('mlo', installdate, 221, 2)
 
-# # testing: installation in BRW... 
-# installdate = '20210318' 
-# uninstalldate = '20211008' 
-# database.add2line_table('brw', installdate, 121, 1)
-# # database.add2line_table('brw', installdate, 101, 1)
+#### testing: installation in BRW... 
+installdate = '20210318' 
+uninstalldate = '20211008' 
+database.add2line_table('brw', installdate, 121, 1)
+database.add2line_table('brw', installdate, 221, 2)
 # database.add2line_table('brw', installdate, 221, 2)
 # database.add2line_table('brw', installdate, 221, 2)
 
@@ -116,7 +145,8 @@ def read_file(path2raw, lines = None,
               # collabels = ['lineID', 'Year', 'DOY', 'HHMM', 'A', 'B', 'C', 'D','temp'],
               collabels = ['lineID', 'Year', 'DOY', 'HHMM'],
               database = None,
-              site = None
+              site = None,
+              when_instrument_not_installed = 'error'
               ):
     """
     The particular way I am reading here allows for later implementation of
@@ -149,77 +179,90 @@ def read_file(path2raw, lines = None,
     #open
     if not isinstance(path2raw, list):
         path2raw = [path2raw,]
+    
+    firstfile = path2raw[0]
+    if magic.from_file(firstfile.as_posix()) == 'Hierarchical Data Format (version 5) data':
+        ds = xr.open_mfdataset(path2raw) 
+        if ('product' not in ds.attrs) or ds.attrs['product'] == 'SP02 raw':
+            return SP02RawData(ds)
 
-    df_all = pd.concat([pd.read_csv(p2r, header=None) for p2r in path2raw])
+    else:
+        df_all = pd.concat([pd.read_csv(p2r, header=None) for p2r in path2raw])
+        
+        # df_all = pd.read_csv(path2raw, header=None
+        # #             names = False
+        #            )
+        # out['df_all_01'] = df_all.copy()
+        colsis = df_all.columns.values
+        colsis = [int(col) for col in colsis]
+        
+        # todo: assigne collumn labels accoreding to instrument info
+        # if 0:
+        colsis[:collabels.shape[0]] = collabels
+        df_all.columns = colsis   
+        # out['df_all_02'] = df_all.copy()
+        # df_all = pd.read_csv(path2raw, names=lines[0]['column_labels'])
     
-    # df_all = pd.read_csv(path2raw, header=None
-    # #             names = False
-    #            )
-    # out['df_all_01'] = df_all.copy()
-    colsis = df_all.columns.values
-    colsis = [int(col) for col in colsis]
-    
-    # todo: assigne collumn labels accoreding to instrument info
-    # if 0:
-    colsis[:collabels.shape[0]] = collabels
-    df_all.columns = colsis   
-    # out['df_all_02'] = df_all.copy()
-    # df_all = pd.read_csv(path2raw, names=lines[0]['column_labels'])
-
-    # make datetime index
-    df_all['HHMM'] = df_all.apply(lambda row: f'{int(row.HHMM):04d}', axis=1)
-    df_all.index = df_all.apply(lambda row: pd.to_datetime(f'{int(row.Year)}0101') + pd.to_timedelta(row.DOY - 1 , 'd') + pd.to_timedelta(int(row.HHMM[:2]), 'h') + pd.to_timedelta(int(row.HHMM[2:]), 'm'), axis=1)
-    df_all.index.name = 'datetime'
-    
-    # data_list = []
-    # df_inst_temp = pd.DataFrame()
-    # df_inst_channels = pd.DataFrame()
-    out['df_all'] = df_all.copy()
-    # return out
-    out_list = []
-    date = df_all.index[0]
-    # print(df_all.lineID.unique())
-    for lid in df_all.lineID.unique():
-        if isinstance(lines, list):
-            if lid not in lines:
-                print(f'{lid} not in lines ({lines})')
+        # make datetime index
+        df_all['HHMM'] = df_all.apply(lambda row: f'{int(row.HHMM):04d}', axis=1)
+        df_all.index = df_all.apply(lambda row: pd.to_datetime(f'{int(row.Year)}0101') + pd.to_timedelta(row.DOY - 1 , 'd') + pd.to_timedelta(int(row.HHMM[:2]), 'h') + pd.to_timedelta(int(row.HHMM[2:]), 'm'), axis=1)
+        df_all.index.name = 'datetime'
+        
+        # data_list = []
+        # df_inst_temp = pd.DataFrame()
+        # df_inst_channels = pd.DataFrame()
+        out['df_all'] = df_all.copy()
+        # return out
+        out_list = []
+        date = df_all.index[0]
+        # print(df_all.lineID.unique())
+        for lid in df_all.lineID.unique():
+            if isinstance(lines, list):
+                if lid not in lines:
+                    print(f'{lid} not in lines ({lines})')
+                    continue
+                
+            df_lid = df_all[df_all.lineID == lid].copy()
+            
+            # there was the case that Longenecker must have created an overlab when stiching two days together ... therefor ->
+            df_lid = df_lid[~df_lid.index.duplicated()]
+            df_lid.sort_index(inplace=True)
+            
+            
+            instrument = database.get_instrument(site, lid, date,
+                                                 when_instrument_not_installed = when_instrument_not_installed)
+            if isinstance(instrument, type(None)):
                 continue
             
-        df_lid = df_all[df_all.lineID == lid].copy()
+            df_lid = df_lid.drop(['lineID', 'Year','DOY', 'HHMM'], axis=1)
+            df_lid.columns = ['A', 'B', 'C', 'D', 'temp']
         
-        # there was the case that Longenecker must have created an overlab when stiching two days together ... therefor ->
-        df_lid = df_lid[~df_lid.index.duplicated()]
-        df_lid.sort_index(inplace=True)
+            # replace invalid values with nan
+            df_lid[df_lid == -99999] = np.nan
+            df_lid[df_lid == -7999.0] = np.nan
         
-        instrument = database.get_instrument(site, lid, date)
-        df_lid = df_lid.drop(['lineID', 'Year','DOY', 'HHMM'], axis=1)
-        df_lid.columns = ['A', 'B', 'C', 'D', 'temp']
-    
-        # replace invalid values with nan
-        df_lid[df_lid == -99999] = np.nan
-        df_lid[df_lid == -7999.0] = np.nan
-    
-        # seperate photo detector readings from temp 
-        df_temp = df_lid.temp
-        df_voltages = df_lid.reindex(['A', 'B', 'C', 'D'], axis= 1)
-    
-        df_voltages.columns.name = 'channel'
-    
-        # create dataset
-        ds = xr.Dataset()
-        ds['raw_data'] = df_voltages
-        ds['internal_temperature'] = df_temp
-        ser = pd.Series(instrument.config)
-        ser.index.name = 'channel'
-        ds['channle_wavelengths'] = ser
-    
-        ds['line_id'] = lid
-        sn = instrument['sn']
-        ds['serial_no'] = sn
-    #     ds_by_instrument[f'sp02_{lid}_{sn}'] = ds
-        out_list.append(ds)
+            # seperate photo detector readings from temp 
+            df_temp = df_lid.temp
+            df_voltages = df_lid.reindex(['A', 'B', 'C', 'D'], axis= 1)
         
-    return out_list
+            df_voltages.columns.name = 'channel'
+        
+            # create dataset
+            ds = xr.Dataset()
+            ds['raw_data'] = df_voltages
+            ds['internal_temperature'] = df_temp
+            ser = pd.Series(instrument.config)
+            ser.index.name = 'channel'
+            ds['channle_wavelengths'] = ser
+        
+            ds['line_id'] = lid
+            sn = instrument['sn']
+            ds['serial_no'] = sn
+            ds.attrs['product'] = 'SP02 raw'
+        #     ds_by_instrument[f'sp02_{lid}_{sn}'] = ds
+            out_list.append(ds)
+            
+        return out_list
 
 #     for line in lines:
 #         lid = line['line_id']
@@ -272,6 +315,7 @@ def convert_raw2nc(path2rawfolder = '/nfs/grad/gradobs/raw/mlo/2020/', path2netc
                    overwrite = False, 
                    verbose = False, 
                    raise_error = True,
+                   when_instrument_not_installed = 'error',
                    test = False):
     """
     
@@ -295,6 +339,9 @@ def convert_raw2nc(path2rawfolder = '/nfs/grad/gradobs/raw/mlo/2020/', path2netc
         DESCRIPTION. The default is False.
     verbose : TYPE, optional
         DESCRIPTION. The default is False.
+    when_instrument_not_installed: str ('error', 'warn', 'silent')
+        what to do when a file contains lines without an instrument asigned to 
+        it. When silent or warn file is skipped. The default is "error".
     test : TYPE, optional
         If True only one file is processed. The default is False.
 
@@ -303,6 +350,10 @@ def convert_raw2nc(path2rawfolder = '/nfs/grad/gradobs/raw/mlo/2020/', path2netc
     None.
 
     """
+    try:
+        import atmPy.data_archives.NOAA_ESRL_GMD_GRAD.baseline.baseline as atmbsl
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError('atmPy is requried to execute this function')
     # lines = get_lines_from_station_header()
     path2rawfolder = pathlib.Path(path2rawfolder)
     path2netcdf = pathlib.Path(path2netcdf)
@@ -346,31 +397,29 @@ def convert_raw2nc(path2rawfolder = '/nfs/grad/gradobs/raw/mlo/2020/', path2netc
     df_in.sort_index(inplace=True)
     df_in = df_in.truncate(before=start_date)
     
+    #### gernerate Workplan
     df_out = pd.DataFrame(columns=['path_out'])
     
     # generate output path
     for sn in sernos:
         for idx, row in df_in.iterrows():
-            # fnnc = row.path_in.name.replace('.dat','.nc')
-            # fnnc = fnnc.replace('-sp02', '.sp02')
-            # fnns = fnnc.split('.')
-            # fnns = fnns[:3] + [f'sn{str(sn)}'] + fnns[3:]
-            # fnnc = '.'.join(fnns)
-            # path2netcdf_file = path2netcdf.joinpath(fnnc)
             date = idx
-            fnnc = f'gradobs.mlo.sp02.sn{sn}.{date.year}{date.month:02d}{date.day:02d}.raw.nc'
+            fnnc = f'gradobs.{site}.sp02.sn{sn}.{date.year}{date.month:02d}{date.day:02d}.raw.nc'
             path2netcdf_file = path2netcdf.joinpath(fnnc)
             df_add = pd.DataFrame({'path_in': row.path_in, 'path_out':path2netcdf_file}, index = [idx]
         #                            ignore_index=True
                                   )
     
-            df_out = df_out.append(df_add)
+            # df_out = df_out.append(df_add) #deprecated
+            df_out = pd.concat([df_out, df_add])
     
     # check if file exists. Process only those that do not exist
     df_out['exists'] = df_out.path_out.apply(lambda x: x.is_file())
-    df_work = df_out[~df_out.exists]
-    # return df_work
-### bsts
+    if not overwrite:
+        df_work = df_out[~df_out.exists]
+    else:
+        df_work = df_out
+        
     work_array = df_work.path_in.unique()
 
     print(f'No of files that need to be processed: {len(work_array)}')
@@ -382,7 +431,9 @@ def convert_raw2nc(path2rawfolder = '/nfs/grad/gradobs/raw/mlo/2020/', path2netc
         # ds = read_file(file, lines)
         df_sel = df_work[df_work.path_in == file]
         try:
-            dslist = read_file(file, database = database, site = site)
+            dslist = read_file(file, database = database, 
+                               site = site,
+                               when_instrument_not_installed = when_instrument_not_installed)
         except IndexError:
             if raise_error:
                 raise
@@ -410,14 +461,23 @@ def convert_raw2nc(path2rawfolder = '/nfs/grad/gradobs/raw/mlo/2020/', path2netc
                 assert(False), 'This Error is usually caused because one of the netcdf files (for a serial number) is deleted, but not the other.'
         
             # save to file
+            #### add some more info to the data array
+            ds.attrs['site'] = site
+            si = [s for s in atmbsl.network.stations._stations_list if s.abb == site.upper()][0]
+            ds.attrs['site_latitude'] = si.lat
+            ds.attrs['site_longitude'] = si.lon
+            ds.attrs['site_elevation'] = si.alt
+            ds.attrs['site_name'] = si.name
             ds.to_netcdf(path2netcdf_file)
         if test:
-            break
+            if e==2:
+                break
     # out = dict(processed = new,
     #            skipped = exists,
     #            last_ds_list = dslist)
     
     if not test:
+        #### check if all has been processed
         df_out['exists'] = df_out.path_out.apply(lambda x: x.is_file())
         df_work = df_out[~df_out.exists]
         work_array = df_work.path_in.unique()
