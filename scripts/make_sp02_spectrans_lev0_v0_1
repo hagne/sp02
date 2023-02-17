@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Aug 22 12:47:54 2022
+
+@author: hagen
+"""
+import xarray as xr
+import pandas as pd
+import pathlib as pl
+import argparse
+
+import sp02.file_io
+
+product_version = '0.1'
+
+
+def make_product(spi):
+    ds = xr.Dataset()
+        
+    ds['sun_position'] = spi.sun_position.loc[:, ['altitude','azimuth']]
+    ds.sun_position.attrs['longname'] = 'The position of the sun in the sky'
+    ds.sun_position.attrs['unit'] = 'radian'
+    
+    ds['sun_earth_distance'] = spi.sun_position.loc[:, ['sun_earth_distance']]
+    ds['airmass'] = spi.sun_position.loc[:, ['airmass']]
+
+    
+    ds['transmission'] = spi.transmission
+    ds.transmission.attrs['longname'] = 'Ratio of light that passes throught the atmosphere.'
+    
+    cpattrs = ['site', 'site_latitude','site_longitude', 'site_elevation', 'site_name']
+    for atr in cpattrs:
+        ds.attrs[atr] = spi.raw_data.attrs[atr]
+    
+    ds.attrs['product_name'] = 'SP02 transmission'
+    ds.attrs['production_datetime'] = pd.Timestamp.now().__str__()
+    
+    ds.attrs['product_version'] = product_version
+    
+    return ds
+
+def get_workplan():
+    p2fld_in_base = pl.Path('/mnt/telg/data/baseline/sp02/raw_nc/')
+    p2fld_out_base = pl.Path('/mnt/telg/data/baseline/sp02/sp02_spectrans_lev0/')
+    product_name = 'spectrans'
+    
+    sites = ['brw',]
+    
+    
+    workplan = pd.DataFrame()
+    for site in sites:
+        for sfld in p2fld_in_base.joinpath(site).glob('*'):
+            pass
+    
+    assert(sfld.is_dir()), f'someone must have sneaked this file in here: {sfld.as_posix()}'
+    
+    workplan = pd.concat([workplan, pd.DataFrame(sfld.glob('*'), columns=['p2f_in'])])
+    
+    # workplan['datestr'] = workplan.apply(lambda row: row.p2f_in.name.split('.')[-3], axis = 1)
+    # assert(workplan.iloc[0].p2f_in.name.split('.')[-4][:2] == 'sn'), f'Parsing problem. The filename should have the serial number at position -4: {workplan.iloc[0].p2f_in.name}'
+    # workplan['serialno'] = workplan.apply(lambda row: row.p2f_in.name.split('.')[-4], axis = 1)
+    
+    workplan.index = workplan.apply(lambda row: pd.to_datetime(row.p2f_in.name.split('.')[-3]), axis = 1)
+    workplan.index.name = 'datetime'
+    
+    workplan['p2f_out'] = workplan.apply(lambda row: p2fld_out_base.joinpath(f'{site}').joinpath(row.p2f_in.name.replace('raw', product_name)), axis = 1)
+    
+    #remove if output file exists
+    workplan = workplan[~workplan.apply(lambda row: row.p2f_out.is_file(), axis = 1)]
+    workplan.sort_index(inplace = True)
+    return workplan
+
+#### if __name__ == '__main__':
+if __name__ == '__main__':
+    #### create log file
+
+    #### argparsing
+    parser = argparse.ArgumentParser()
+    # parser.add_argument('-i', '--init', help = "Path to initiation file. All other arguments will be ignored.")
+    # parser.add_argument('-n', '--todo', nargs='+', default=[], help = 'list of processes to run. To see option type jibarish here read the error message')
+    # parser.add_argument('-c', '--cpus', help = 'number of cpus')
+    # parser.add_argument('-s', '--start', help = 'start datetime, e.g. "2022-01-01 00:00:00"')
+    # parser.add_argument('-e', '--end', help = 'end datetime, e.g. "2022-01-01 00:00:00"')
+    parser.add_argument('-v', '--verbose', help = 'verbose', action='store_true')
+    # parser.add_argument('-r', '--reverse', help = 'reverse the workplan. Good if one wants to start a second process on the same product. Note, process tests each time if output file exists and will not try to re-process', action='store_true')
+    parser.add_argument('-t', '--test', action="store_true", help='will not execute at the end.')
+    # parser.add_argument('-c', '--comment', help = 'some comment, e.g. which server this was stared on')
+    args = parser.parse_args()
+    print('args:')
+    print(args)
+    
+    
+    workplan = get_workplan()
+    print(f'no of files to be processed: {workplan.shape[0]}')
+    for idx, row in workplan.iterrows():
+        print('.', end = '')
+        spi = sp02.file_io.read_file(row.p2f_in)
+        ds = make_product(spi)
+        ds.to_netcdf(row.p2f_out)
+        print('|', end = '')
+        if args.test:
+            break
+    print('done')
+    
+    
+    

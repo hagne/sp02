@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Aug 23 09:52:59 2022
+
+@author: hagen
+"""
+import pathlib as pl
+import pandas as pd
+import xarray as xr
+import argparse
+import sp02.file_io
+import numpy as np
+import warnings
+# warnings.filterwarnings("ignore", message="divide by zero encountered in divide")
+# warnings.simplefilter('ignore',lineno=743)
+# warnings.simplefilter('ignore',lineno=745)
+# warnings.simplefilter('ignore',lineno=2158)
+warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+product_version = '0.1'
+
+def make_product(spi):
+    # p2f =  pl.Path('/mnt/telg/data/baseline/sp02/raw_nc/brw/2021/gradobs.brw.sp02.sn1032.20210703.raw.nc')
+    # spi = sp02.file_io.read_file(p2f)
+    
+    # We need to make sure that we have the entire am or pm
+    # in the future we probably want to stich files (like i did before) to make
+    # sure we have a continues am or pm 
+    # in Barrow each day has a continues am!
+    date = pd.to_datetime(spi.raw_data.datetime.to_pandas().median().date())
+    fst,lst = spi.sun_position.iloc[[0,-1]].loc[:,'ampm']
+    if fst != lst:
+        warnings.warn(f'we are currently on am data, therefore pm has to be around am. {date}')
+    try:
+        out = spi.am.clean()
+        spic = out['langley']
+        # spic.langley_fitres
+        resstats = pd.DataFrame([spic.langley_fit_residual.mean(), spic.langley_fit_residual.median(), spic.langley_fit_residual.std()], index = ['mean', 'median', 'sdt'])
+        resstats.index.name = 'resstats'
+        ds = xr.Dataset({
+                         #'langleys': spic.langleys,
+                         # 'langley_fit_residual': spic.langley_fit_residual,
+                         'langley_fitres': spic.langley_fitres,
+                         'langley_residual_correlation_prop': spic.langley_residual_correlation_prop['determinant'],
+                         'sp02_serial_no': int(spi.raw_data.serial_no),
+                         'valid_points': spic.langley_fit_residual.shape[0],
+                         'residual_stats': resstats,
+                         })
+        ds['cleaning_iterations'] = out['iterations']
+        ds['LinAlgError'] = 0
+        print('>', end = '')
+        
+    except (np.linalg.LinAlgError, ValueError, TypeError):
+        #### TODO: catch the Value and Type error where they originate.
+        ds = xr.Dataset()
+        ds['LinAlgError'] = 1
+        print('<', end = '')
+    
+    ds = ds.expand_dims({'datetime': [date,]})
+    return ds
+    
+
+def get_workplan(overwrite = False):
+    p2fld_in_base = pl.Path('/mnt/telg/data/baseline/sp02/raw_nc/')
+    p2fld_out_base = pl.Path('/mnt/telg/data/baseline/sp02/sp02_langleys/')
+    product_name = 'langleys'
+    
+    sites = ['brw',]
+    
+    
+    workplan = pd.DataFrame()
+    for site in sites:
+        for sfld in p2fld_in_base.joinpath(site).glob('*'):
+            pass
+    
+    assert(sfld.is_dir()), f'someone must have sneaked this file in here: {sfld.as_posix()}'
+    
+    workplan = pd.concat([workplan, pd.DataFrame(sfld.glob('*'), columns=['p2f_in'])])
+    
+    # workplan['datestr'] = workplan.apply(lambda row: row.p2f_in.name.split('.')[-3], axis = 1)
+    # assert(workplan.iloc[0].p2f_in.name.split('.')[-4][:2] == 'sn'), f'Parsing problem. The filename should have the serial number at position -4: {workplan.iloc[0].p2f_in.name}'
+    # workplan['serialno'] = workplan.apply(lambda row: row.p2f_in.name.split('.')[-4], axis = 1)
+    
+    workplan.index = workplan.apply(lambda row: pd.to_datetime(row.p2f_in.name.split('.')[-3]), axis = 1)
+    workplan.index.name = 'datetime'
+    
+    workplan['p2f_out'] = workplan.apply(lambda row: p2fld_out_base.joinpath(f'{site}').joinpath(row.p2f_in.name.replace('raw', product_name)), axis = 1)
+    
+    #remove if output file exists
+    if not overwrite:
+        workplan = workplan[~workplan.apply(lambda row: row.p2f_out.is_file(), axis = 1)]
+    
+    workplan.sort_index(inplace = True)
+    return workplan
+
+
+#### if __name__ == '__main__':
+if __name__ == '__main__':
+    #### create log file
+
+            
+    #### argparsing
+    parser = argparse.ArgumentParser()
+    # parser.add_argument('-i', '--init', help = "Path to initiation file. All other arguments will be ignored.")
+    # parser.add_argument('-n', '--todo', nargs='+', default=[], help = 'list of processes to run. To see option type jibarish here read the error message')
+    # parser.add_argument('-c', '--cpus', help = 'number of cpus')
+    # parser.add_argument('-s', '--start', help = 'start datetime, e.g. "2022-01-01 00:00:00"')
+    # parser.add_argument('-e', '--end', help = 'end datetime, e.g. "2022-01-01 00:00:00"')
+    parser.add_argument('-v', '--verbose', help = 'verbose', action='store_true')
+    parser.add_argument('-o', '--overwrite', help = 'Thise overwrite all existing files.', action='store_true')
+    # parser.add_argument('-r', '--reverse', help = 'reverse the workplan. Good if one wants to start a second process on the same product. Note, process tests each time if output file exists and will not try to re-process', action='store_true')
+    parser.add_argument('-t', '--test', action="store_true", help='will not execute at the end.')
+    # parser.add_argument('-c', '--comment', help = 'some comment, e.g. which server this was stared on')
+    args = parser.parse_args()
+    print('args:')
+    print(args)
+    
+    
+    workplan = get_workplan(overwrite = args.overwrite)
+    print(f'no of files to be processed: {workplan.shape[0]}')
+    for idx, row in workplan.iterrows():
+        print('.', end = '')
+        spi = sp02.file_io.read_file(row.p2f_in)
+        
+        # assert(fst == lst), 'we are currently on am data, therefore pm has to be around am'
+        ds = make_product(spi)
+
+        ds.to_netcdf(row.p2f_out)
+        print('|', end = '')
+        if args.test:
+            break
+    print('done')

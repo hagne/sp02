@@ -15,6 +15,7 @@ import atmPy.general.measurement_site as atmms
 
 class SP02RawData(object):
     def __init__(self, dataset, site = None, langley_fit_settings = None):
+        assert(False), 'deprecated, this is now in atmPy.radiation.observations.spectral_irradiance'
         self.raw_data = dataset
         if isinstance(site, type(None)):
             assert('site' in dataset.attrs.keys()), 'If site is None, then the dataset has have lat,lon,site, site_name, attributes'
@@ -151,3 +152,5 @@ class SP02RawData(object):
         self._am = calib.Langley(self,langley_am[~langley_am.index.isna()], langley_fit_settings = self.langley_fit_settings)
         self._pm = calib.Langley(self,langley_pm[~langley_pm.index.isna()], langley_fit_settings = self.langley_fit_settings)
         return True
+    
+    

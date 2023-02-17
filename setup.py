@@ -19,6 +19,10 @@ setup(
     license="MIT",
     keywords="sp02",
     url="https://github.com/hagne/sp02",
+    scripts=['scripts/make_sp02_spectrans_lev0_v0_1', 
+             'scripts/make_sp02_langley_v0_1',
+         ],
+
     # install_requires=['numpy','pandas'],
     # extras_require={'plotting': ['matplotlib'],
     #                 'testing': ['scipy']},
